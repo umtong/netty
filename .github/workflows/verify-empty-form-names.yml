@@ -1,0 +1,92 @@
+name: Verify empty form names
+on:
+  push:
+    branches: ["ci/form-empty-keys"]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MAVEN_OPTS: -Xmx2g
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Reproduce the failures with the original constructor
+        shell: bash
+        run: |
+          git show bcd2c6b17567ae823a39c202475a0e400e82c957:codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java > codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
+          set +e
+          ./mvnw -B -ntp -pl codec-http -am '-Dtest=io.netty.handler.codec.http.multipart.HttpPostStandardRequestDecoderTest#testDecodeEmptyNameAtEndOfInput+testDecodeRepeatedEmptyNames,io.netty.handler.codec.http.multipart.HttpPostRequestEncoderTest#testEncodeEmptyAttributeNames+testMultipartEmptyNamesRoundTrip,io.netty.handler.codec.http.multipart.HttpDataTest#testNonEmptyNameMustNotBecomeEmptyAfterCleaning' -Dsurefire.failIfNoSpecifiedTests=false test > baseline.log 2>&1
+          baseline_exit=$?
+          set -e
+          tail -n 80 baseline.log
+          test "$baseline_exit" -ne 0
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          from collections import Counter
+          expected = {
+              "testDecodeEmptyNameAtEndOfInput": 3,
+              "testDecodeRepeatedEmptyNames": 3,
+              "testEncodeEmptyAttributeNames": 1,
+              "testMultipartEmptyNamesRoundTrip": 1,
+              "testNonEmptyNameMustNotBecomeEmptyAfterCleaning": 1,
+          }
+          seen = Counter()
+          errors = 0
+          for path in glob.glob("codec-http/target/surefire-reports/TEST-*.xml"):
+              for case in ET.parse(path).getroot().findall("testcase"):
+                  name = case.attrib["name"].split("(")[0]
+                  assert name in expected, (name, path)
+                  seen[name] += 1
+                  assert case.find("skipped") is None, name
+                  assert case.find("failure") is None, name
+                  error = case.find("error")
+                  if name == "testNonEmptyNameMustNotBecomeEmptyAfterCleaning":
+                      assert error is None, name
+                  else:
+                      assert error is not None, name
+                      trace = "".join(error.itertext())
+                      assert "IllegalArgumentException" in trace and "checkNonEmpty" in trace, (name, trace)
+                      errors += 1
+          assert seen == Counter(expected), seen
+          assert errors == 8, errors
+          print("Verified baseline: 8 expected empty-name errors; 1 validation control passed.")
+          PY
+      - name: Test the fixed codec-http dependency reactor
+        shell: bash
+        run: |
+          git restore --worktree -- codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
+          ./mvnw -B -ntp -pl codec-http -am test > fixed.log 2>&1
+          tail -n 100 fixed.log
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          totals = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
+          for path in glob.glob("**/target/surefire-reports/TEST-*.xml", recursive=True):
+              root = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(root.attrib.get(key, 0))
+          assert totals["tests"] > 100, totals
+          assert totals["failures"] == 0 and totals["errors"] == 0, totals
+          print("Fixed reactor totals:", totals)
+          PY
+          git diff --exit-code
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: empty-form-name-results
+          retention-days: 7
+          path: |
+            baseline.log
+            fixed.log
+            **/target/surefire-reports/TEST-*.xml
