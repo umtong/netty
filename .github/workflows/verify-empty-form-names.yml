@@ -25,10 +25,10 @@ jobs:
           git fetch --depth=1 origin bcd2c6b17567ae823a39c202475a0e400e82c957
           git show bcd2c6b17567ae823a39c202475a0e400e82c957:codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java > codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
           set +e
-          ./mvnw -B -ntp -pl codec-http -am '-Dtest=io.netty.handler.codec.http.multipart.HttpPostStandardRequestDecoderTest#testDecodeEmptyNameAtEndOfInput+testDecodeRepeatedEmptyNames,io.netty.handler.codec.http.multipart.HttpPostRequestEncoderTest#testEncodeEmptyAttributeNames+testMultipartEmptyNamesRoundTrip,io.netty.handler.codec.http.multipart.HttpDataTest#testNonEmptyNameMustNotBecomeEmptyAfterCleaning' -Dsurefire.failIfNoSpecifiedTests=false test > baseline.log 2>&1
+          ./mvnw -B -ntp -pl codec-http -am '-Dtest=io.netty.handler.codec.http.multipart.HttpPostStandardRequestDecoderTest#testDecodeEmptyNameAtEndOfInput+testDecodeRepeatedEmptyNames,io.netty.handler.codec.http.multipart.HttpPostRequestEncoderTest#testEncodeEmptyAttributeNames+testMultipartEmptyNamesRoundTrip,io.netty.handler.codec.http.multipart.HttpDataTest#testNonEmptyNameMustNotBecomeEmptyAfterCleaning' -Dsurefire.failIfNoSpecifiedTests=false test > "$RUNNER_TEMP/baseline.log" 2>&1
           baseline_exit=$?
           set -e
-          tail -n 80 baseline.log
+          tail -n 80 "$RUNNER_TEMP/baseline.log"
           test "$baseline_exit" -ne 0
           python3 - <<'PY'
           import glob
@@ -67,10 +67,10 @@ jobs:
         run: |
           git restore --worktree -- codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
           set +e
-          ./mvnw -B -ntp -pl codec-http -am test > fixed.log 2>&1
+          ./mvnw -B -ntp -pl codec-http -am test > "$RUNNER_TEMP/fixed.log" 2>&1
           fixed_exit=$?
           set -e
-          tail -n 150 fixed.log
+          tail -n 150 "$RUNNER_TEMP/fixed.log"
           test "$fixed_exit" -eq 0
           python3 - <<'PY'
           import glob
@@ -92,6 +92,6 @@ jobs:
           name: empty-form-name-results
           retention-days: 7
           path: |
-            baseline.log
-            fixed.log
+            ${{ runner.temp }}/baseline.log
+            ${{ runner.temp }}/fixed.log
             **/target/surefire-reports/TEST-*.xml
