@@ -66,8 +66,12 @@ jobs:
         shell: bash
         run: |
           git restore --worktree -- codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
+          set +e
           ./mvnw -B -ntp -pl codec-http -am test > fixed.log 2>&1
-          tail -n 100 fixed.log
+          fixed_exit=$?
+          set -e
+          tail -n 150 fixed.log
+          test "$fixed_exit" -eq 0
           python3 - <<'PY'
           import glob
           import xml.etree.ElementTree as ET
