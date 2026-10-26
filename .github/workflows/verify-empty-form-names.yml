@@ -22,6 +22,7 @@ jobs:
       - name: Reproduce the failures with the original constructor
         shell: bash
         run: |
+          git fetch --depth=1 origin bcd2c6b17567ae823a39c202475a0e400e82c957
           git show bcd2c6b17567ae823a39c202475a0e400e82c957:codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java > codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
           set +e
           ./mvnw -B -ntp -pl codec-http -am '-Dtest=io.netty.handler.codec.http.multipart.HttpPostStandardRequestDecoderTest#testDecodeEmptyNameAtEndOfInput+testDecodeRepeatedEmptyNames,io.netty.handler.codec.http.multipart.HttpPostRequestEncoderTest#testEncodeEmptyAttributeNames+testMultipartEmptyNamesRoundTrip,io.netty.handler.codec.http.multipart.HttpDataTest#testNonEmptyNameMustNotBecomeEmptyAfterCleaning' -Dsurefire.failIfNoSpecifiedTests=false test > baseline.log 2>&1
