@@ -25,7 +25,7 @@ jobs:
           git fetch --depth=1 origin bcd2c6b17567ae823a39c202475a0e400e82c957
           git show bcd2c6b17567ae823a39c202475a0e400e82c957:codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java > codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
           set +e
-          ./mvnw -B -ntp -pl codec-http -am '-Dtest=io.netty.handler.codec.http.multipart.HttpPostStandardRequestDecoderTest#testDecodeEmptyNameAtEndOfInput+testDecodeRepeatedEmptyNames,io.netty.handler.codec.http.multipart.HttpPostRequestEncoderTest#testEncodeEmptyAttributeNames+testMultipartEmptyNamesRoundTrip,io.netty.handler.codec.http.multipart.HttpDataTest#testNonEmptyNameMustNotBecomeEmptyAfterCleaning' -Dsurefire.failIfNoSpecifiedTests=false test > "$RUNNER_TEMP/baseline.log" 2>&1
+          ./mvnw -B -ntp -Pboringssl -pl codec-http -am '-Dtest=io.netty.handler.codec.http.multipart.HttpPostStandardRequestDecoderTest#testDecodeEmptyNameAtEndOfInput+testDecodeRepeatedEmptyNames,io.netty.handler.codec.http.multipart.HttpPostRequestEncoderTest#testEncodeEmptyAttributeNames+testMultipartEmptyNamesRoundTrip,io.netty.handler.codec.http.multipart.HttpDataTest#testNonEmptyNameMustNotBecomeEmptyAfterCleaning' -Dsurefire.failIfNoSpecifiedTests=false test > "$RUNNER_TEMP/baseline.log" 2>&1
           baseline_exit=$?
           set -e
           tail -n 80 "$RUNNER_TEMP/baseline.log"
@@ -62,12 +62,21 @@ jobs:
           assert errors == 8, errors
           print("Verified baseline: 8 expected empty-name errors; 1 validation control passed.")
           PY
-      - name: Test the fixed codec-http dependency reactor
+      - name: Build the fixed codec-http dependencies
         shell: bash
         run: |
           git restore --worktree -- codec-http/src/main/java/io/netty/handler/codec/http/multipart/AbstractHttpData.java
           set +e
-          ./mvnw -B -ntp -pl codec-http -am test > "$RUNNER_TEMP/fixed.log" 2>&1
+          ./mvnw -B -ntp -Pboringssl -pl codec-http -am -DskipTests install > "$RUNNER_TEMP/install.log" 2>&1
+          install_exit=$?
+          set -e
+          tail -n 100 "$RUNNER_TEMP/install.log"
+          test "$install_exit" -eq 0
+      - name: Test the complete fixed codec-http module
+        shell: bash
+        run: |
+          set +e
+          ./mvnw -B -ntp -Pboringssl -pl codec-http test > "$RUNNER_TEMP/fixed.log" 2>&1
           fixed_exit=$?
           set -e
           tail -n 150 "$RUNNER_TEMP/fixed.log"
@@ -75,14 +84,30 @@ jobs:
           python3 - <<'PY'
           import glob
           import xml.etree.ElementTree as ET
+          from collections import Counter
           totals = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
-          for path in glob.glob("**/target/surefire-reports/TEST-*.xml", recursive=True):
+          expected = {
+              "testDecodeEmptyNameAtEndOfInput": 3,
+              "testDecodeRepeatedEmptyNames": 3,
+              "testEncodeEmptyAttributeNames": 1,
+              "testMultipartEmptyNamesRoundTrip": 1,
+              "testNonEmptyNameMustNotBecomeEmptyAfterCleaning": 1,
+          }
+          seen = Counter()
+          for path in glob.glob("codec-http/target/surefire-reports/TEST-*.xml"):
               root = ET.parse(path).getroot()
               for key in totals:
                   totals[key] += int(root.attrib.get(key, 0))
+              for case in root.findall("testcase"):
+                  name = case.attrib["name"].split("(")[0]
+                  if name in expected:
+                      seen[name] += 1
+                      assert case.find("skipped") is None, name
+          assert seen == Counter(expected), seen
           assert totals["tests"] > 100, totals
           assert totals["failures"] == 0 and totals["errors"] == 0, totals
-          print("Fixed reactor totals:", totals)
+          print("Fixed codec-http totals:", totals)
+          print("All 9 new regression/control invocations passed.")
           PY
           git diff --exit-code
       - name: Preserve test results
@@ -93,5 +118,6 @@ jobs:
           retention-days: 7
           path: |
             ${{ runner.temp }}/baseline.log
+            ${{ runner.temp }}/install.log
             ${{ runner.temp }}/fixed.log
             **/target/surefire-reports/TEST-*.xml
